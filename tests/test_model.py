@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from model import load_data, preprocess, train, evaluate, predict, CLASS_NAMES
+from model import load_data, preprocess, train, evaluate, predict, predict_with_confidence, CLASS_NAMES
 
 
 # ──────────────────────────────────────────────
@@ -156,3 +156,27 @@ class TestPrediction:
         model, scaler, _, _ = trained_model
         result = predict(model, scaler, [5.8, 2.7, 5.1, 1.9])
         assert isinstance(result, str)
+
+
+class TestPredictWithConfidence:
+    def test_returns_tuple(self, trained_model):
+        model, scaler, _, _ = trained_model
+        result = predict_with_confidence(model, scaler, [5.1, 3.5, 1.4, 0.2])
+        assert isinstance(result, tuple) and len(result) == 2
+
+    def test_confidence_keys_are_class_names(self, trained_model):
+        model, scaler, _, _ = trained_model
+        _, confidence = predict_with_confidence(model, scaler, [5.1, 3.5, 1.4, 0.2])
+        assert set(confidence.keys()) == set(CLASS_NAMES)
+
+    def test_confidence_sums_to_one(self, trained_model):
+        model, scaler, _, _ = trained_model
+        _, confidence = predict_with_confidence(model, scaler, [5.1, 3.5, 1.4, 0.2])
+        total = sum(confidence.values())
+        assert abs(total - 1.0) < 1e-4, f"Probabilities should sum to 1, got {total}"
+
+    def test_predicted_class_has_highest_confidence(self, trained_model):
+        model, scaler, _, _ = trained_model
+        pred_class, confidence = predict_with_confidence(model, scaler, [6.3, 3.3, 6.0, 2.5])
+        best = max(confidence, key=confidence.get)
+        assert pred_class == best
