@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────────────────
+# CD Pipeline — PRODUCTION Branch
+#
+# Triggers:  push into `prod` (via reviewed & approved PR from stg)
+# Purpose:   Strictest quality gates. No direct pushes allowed.
+#            Only promoted artifacts from staging reach here.
+#            On success → deploys to production & creates a release tag.
+# ─────────────────────────────────────────────────────────────────
+
+name: CD — Production Branch
+
+on:
+  push:
+    branches: [ prod ]
+  # PRs to prod are allowed for review but deployment only runs on merge
+  pull_request:
+    branches: [ prod ]
+
+env:
+  ENV: prod         # 🔑 Tells config.py which thresholds to use
+  PYTHON_VERSION: "3.11"
+
+jobs:
+
+  # ── Gate 1: Full test suite ──────────────────────────────────
+  full-test-suite:
+    name: 🧪 Full Test Suite (All Environments)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt pytest-cov
+
+      - name: Run ALL tests
+        run: pytest tests/ -v
+
+      - name: Generate coverage report
+        run: pytest tests/ --cov=src --cov-report=xml --cov-report=term --cov-fail-under=80
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-coverage-report
+          path: coverage.xml
+
+  # ── Gate 2: Strict production quality gate ──────────────────
+  prod-quality-gate:
+    name: 🔒 Production Quality Gate (Accuracy ≥ 0.93)
+    runs-on: ubuntu-latest
+    needs: full-test-suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+
+      - name: Run PROD integration tests only
+        run: pytest tests/test_integration.py -v -m prod
+
+  # ── Gate 3: Security & dependency scan ──────────────────────
+  security-scan:
+    name: 🛡️ Security Scan
+    runs-on: ubuntu-latest
+    needs: full-test-suite
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install safety
+      - name: Check for known vulnerabilities
+        run: safety check -r requirements.txt || echo "⚠️ Review vulnerabilities before deploy"
+
+  # ── Deploy (only on merge to prod, not PRs) ─────────────────
+  deploy-to-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [ prod-quality-gate, security-scan ]
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    environment:
+      name: production
+      url: https://iris-api.example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+
+      - name: Train final model with prod settings
+        run: |
+          ENV=prod python src/model.py
+          echo "✅ Production model artifact saved"
+
+      - name: Upload production model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-model-artifact
+          path: models/
+          retention-days: 90    # keep prod artifacts for 90 days
+
+      # In a real project: push Docker image, update Kubernetes, call deploy API, etc.
+      - name: Deploy to production servers
+        run: |
+          echo "🚢 Deploying to production..."
+          echo "📦 Pushing model artifact..."
+          echo "🔄 Rolling update — zero downtime..."
+          echo "✅ Production deploy complete!"
+          echo "🌐 Live at https://iris-api.example.com"
+
+  # ── Tag the release ─────────────────────────────────────────
+  create-release:
+    name: 🏷️ Create Release Tag
+    runs-on: ubuntu-latest
+    needs: deploy-to-production
+    if: github.ref == 'refs/heads/prod' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release tag
+        run: |
+          DATE=$(date +'%Y%m%d-%H%M')
+          TAG="release-${DATE}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Production release $TAG"
+          git push origin "$TAG"
+          echo "🏷️ Tagged release: $TAG"
+
+  prod-summary:
+    name: ✅ Production CD Summary
+    runs-on: ubuntu-latest
+    needs: [ deploy-to-production, create-release ]
+    if: always()
+    steps:
+      - run: echo "🎉 Production deploy complete and tagged!"

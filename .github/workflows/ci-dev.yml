@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────────
+# CI Pipeline — DEV Branch
+#
+# Triggers:  push or PR into the `dev` branch
+# Purpose:   Fast smoke tests. Catch obvious breakage early.
+#            Developers get feedback in < 2 minutes.
+# ─────────────────────────────────────────────────────────────────
+
+name: CI — Dev Branch
+
+on:
+  push:
+    branches: [ dev ]
+  pull_request:
+    branches: [ dev ]
+
+env:
+  ENV: dev          # 🔑 Tells config.py which thresholds to use
+  PYTHON_VERSION: "3.11"
+
+jobs:
+
+  lint:
+    name: 🔍 Lint & Style Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install linting tools
+        run: pip install flake8
+
+      - name: Run flake8
+        run: |
+          flake8 src/ tests/ \
+            --max-line-length=100 \
+            --ignore=E203,W503
+
+  unit-tests:
+    name: 🧪 Unit Tests (Dev Thresholds)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest tests/test_model.py tests/test_data_utils.py -v
+
+      - name: Run dev integration tests
+        run: pytest tests/test_integration.py -v -m dev
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-test-results
+          path: .pytest_cache/
+
+  # Summary badge shown in PR
+  dev-summary:
+    name: ✅ Dev CI Summary
+    runs-on: ubuntu-latest
+    needs: [ lint, unit-tests ]
+    steps:
+      - run: echo "🎉 Dev pipeline passed! Safe to merge into dev."

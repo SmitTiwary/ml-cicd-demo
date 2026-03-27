@@ -1,0 +1,112 @@
+# ─────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — STAGING Branch
+#
+# Triggers:  push or PR into the `stg` branch
+# Purpose:   Full integration tests with tighter thresholds.
+#            Validates the model is production-ready.
+#            On success → deploys to the staging environment.
+# ─────────────────────────────────────────────────────────────────
+
+name: CI/CD — Staging Branch
+
+on:
+  push:
+    branches: [ stg ]
+  pull_request:
+    branches: [ stg ]
+
+env:
+  ENV: stg          # 🔑 Tells config.py which thresholds to use
+  PYTHON_VERSION: "3.11"
+
+jobs:
+
+  lint-and-format:
+    name: 🔍 Lint + Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install flake8 black
+      - name: Check formatting
+        run: black --check src/ tests/
+      - name: Run flake8
+        run: flake8 src/ tests/ --max-line-length=100 --ignore=E203,W503
+
+  unit-tests:
+    name: 🧪 Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-format
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+      - run: pytest tests/test_model.py tests/test_data_utils.py -v
+
+  integration-tests:
+    name: 🔗 Integration Tests (Stg Thresholds)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+      - name: Run stg integration tests
+        run: pytest tests/test_integration.py -v -m stg
+      - name: Generate coverage report
+        run: |
+          pip install pytest-cov
+          pytest tests/ --cov=src --cov-report=xml --cov-report=term
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: stg-coverage-report
+          path: coverage.xml
+
+  deploy-to-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/stg'   # only on direct push, not PRs
+    environment:
+      name: staging
+      url: https://staging.example-iris-api.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -r requirements.txt
+
+      - name: Train & save model artifact
+        run: |
+          ENV=stg python src/model.py
+          echo "✅ Model artifact saved to models/"
+
+      - name: Upload model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stg-model-artifact
+          path: models/
+
+      # In a real project this step would push to a staging server,
+      # update a Docker image, or call a deploy API.
+      - name: Simulate deployment to staging
+        run: |
+          echo "📦 Deploying model artifact to staging environment..."
+          echo "🌐 App live at https://staging.example-iris-api.com"
+          echo "✅ Staging deploy complete!"
+
+  stg-summary:
+    name: ✅ Staging CI/CD Summary
+    runs-on: ubuntu-latest
+    needs: [ unit-tests, integration-tests, deploy-to-staging ]
+    if: always()
+    steps:
+      - run: echo "🎯 Staging pipeline complete. Review and raise a PR to prod."
