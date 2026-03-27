@@ -57,6 +57,19 @@ def predict(model, scaler, features: list):
     return CLASS_NAMES[pred]
 
 
+def predict_with_confidence(model, scaler, features: list):
+    """
+    Predict a single sample and return confidence scores for all classes.
+    Returns: (predicted_class, {class_name: probability})
+    """
+    x = np.array(features).reshape(1, -1)
+    x_scaled = scaler.transform(x)
+    pred = model.predict(x_scaled)[0]
+    proba = model.predict_proba(x_scaled)[0]
+    confidence = {CLASS_NAMES[i]: round(float(p), 4) for i, p in enumerate(proba)}
+    return CLASS_NAMES[pred], confidence
+
+
 def save_model(model, scaler, path="models/"):
     """Save model and scaler to disk."""
     os.makedirs(path, exist_ok=True)
