@@ -3,15 +3,14 @@ test_data_utils.py — Unit tests for src/data_utils.py
 
 Run with:  pytest tests/test_data_utils.py -v
 """
-
+from model import load_data
 import pytest
-import numpy as np
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from data_utils import validate_features, split_dataset, data_summary, get_feature_names
-from model import load_data
+
 
 
 # ──────────────────────────────────────────────
